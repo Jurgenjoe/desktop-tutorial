@@ -2990,12 +2990,51 @@ function checkPriceAlerts() {
     if (hit) {
       a.triggered = true;
       fireAlertToast(a, price);
+      sendLineNotification(`🔔 ${a.ticker} ${a.cond==='above'?'ขึ้นถึง':'ลงถึง'} $${fmt(a.price)}\nราคาปัจจุบัน: $${fmt(price)}`);
       sb.from('price_alerts').update({ triggered: true }).eq('id', a.id).then(()=>{}).catch(()=>{});
       if (detailState.open && detailState.ticker===a.ticker) { renderAlertsUI(); drawChart(); }
     }
   });
   // prune triggered after firing once
   detailState.alerts = detailState.alerts.filter(a=>!a.triggered);
+}
+
+// ---- LINE notification ----
+// NOTE: calling api.line.me directly from the browser puts your channel
+// access token in plain view (page source / devtools network tab) for
+// anyone who opens this page. Treat it as public if you deploy this file
+// anywhere other than your own machine, and rotate it in the LINE
+// Developers Console if that ever happens.
+const LINE_CHANNEL_ACCESS_TOKEN = 'PASTE_YOUR_NEW_CHANNEL_ACCESS_TOKEN_HERE';
+const LINE_USER_ID = 'PASTE_YOUR_USER_ID_HERE'; // the "Your user ID" value from Basic settings
+
+async function sendLineNotification(text) {
+  if (!LINE_CHANNEL_ACCESS_TOKEN || LINE_CHANNEL_ACCESS_TOKEN.startsWith('PASTE_')) {
+    console.warn('LINE notification skipped: token/user ID not set.');
+    return;
+  }
+  try {
+    const res = await fetch('https://api.line.me/v2/bot/message/push', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${LINE_CHANNEL_ACCESS_TOKEN}`
+      },
+      body: JSON.stringify({
+        to: LINE_USER_ID,
+        messages: [{ type: 'text', text }]
+      })
+    });
+    if (!res.ok) {
+      const err = await res.text();
+      console.error('LINE push failed:', res.status, err);
+    }
+  } catch (e) {
+    // Most likely culprit if this fires: LINE's API does not send CORS
+    // headers, so the browser blocks the request before it even reaches
+    // LINE's servers. Check the browser console for a CORS error to confirm.
+    console.error('LINE push error (possibly CORS-blocked):', e);
+  }
 }
 
 function fireAlertToast(a, price) {
