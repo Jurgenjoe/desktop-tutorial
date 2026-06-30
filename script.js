@@ -1,6 +1,6 @@
 // ---- SUPABASE SETUP ----
-const SUPABASE_URL = 'https://vpkjwsypxjpouxegyfkw.supabase.co';
-const SUPABASE_KEY = 'sb_publishable_wdGgFdHqIqH2E0tCkrzOUw_NtqRXbEu';
+const SUPABASE_URL = 'https://xhxyxkphsxujwmoukonk.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_kOtnsJpUcMeAO4l5qhSPmQ_em5Ealhs';
 const { createClient } = supabase;
 const sb = createClient(SUPABASE_URL, SUPABASE_KEY);
 
@@ -3117,12 +3117,93 @@ function checkPin() {
   }
 }
 
+// ===== Pending Imports (รายการที่ระบบเช็คอีเมลเจอ รอผู้ใช้กดยืนยัน) =====
+let _pendingImportsFromEmail = [];
+
+async function loadPendingImportsFromSB() {
+  try {
+    const { data, error } = await sb.from('pending_imports').select('*').eq('status', 'pending').order('detected_at', { ascending: false });
+    if (error) throw error;
+    _pendingImportsFromEmail = data || [];
+  } catch (e) {
+    _pendingImportsFromEmail = [];
+  }
+  renderPendingImports();
+}
+
+function renderPendingImports() {
+  const section = document.getElementById('pendingImportsSection');
+  const badge = document.getElementById('pendingImportBadge');
+  const countEl = document.getElementById('pendingImportsCount');
+  const tbody = document.getElementById('pendingImportsBody');
+  if (!section || !tbody) return;
+
+  const n = _pendingImportsFromEmail.length;
+  if (n === 0) {
+    section.style.display = 'none';
+    if (badge) badge.style.display = 'none';
+    return;
+  }
+  section.style.display = 'block';
+  if (badge) { badge.style.display = 'inline-block'; badge.textContent = n; }
+  if (countEl) countEl.textContent = n + ' รายการ';
+
+  tbody.innerHTML = _pendingImportsFromEmail.map((p, i) => `
+    <tr style="border-bottom:1px solid var(--border)">
+      <td style="padding:6px 8px">📧</td>
+      <td class="mono" style="padding:6px 8px;font-size:0.78rem">${p.order_id || '—'}</td>
+      <td style="padding:6px 8px;font-weight:700;color:${p.tx_type === 'SELL' ? 'var(--red,#ef4444)' : 'var(--green,#22c55e)'}">${p.tx_type === 'SELL' ? 'ขาย' : 'ซื้อ'}</td>
+      <td style="padding:6px 8px;font-weight:700;color:var(--accent)">${p.ticker}</td>
+      <td class="mono" style="padding:6px 8px">${fmt(p.shares, 4)}</td>
+      <td class="mono" style="padding:6px 8px">$${fmt(p.unit_price)}</td>
+      <td class="mono" style="padding:6px 8px">฿${fmt(p.gross_thb)}</td>
+      <td class="mono" style="padding:6px 8px;font-size:0.78rem">${p.effective_date || '—'}</td>
+      <td style="padding:6px 8px;white-space:nowrap">
+        <button class="btn btn-primary" style="padding:4px 10px;font-size:0.78rem" onclick="confirmPendingImport(${i})">✅ ยืนยัน</button>
+        <button class="btn btn-outline" style="padding:4px 10px;font-size:0.78rem" onclick="rejectPendingImport(${i})">✕</button>
+      </td>
+    </tr>
+  `).join('');
+}
+
+async function confirmPendingImport(idx) {
+  const p = _pendingImportsFromEmail[idx];
+  if (!p) return;
+  try {
+    await processSingleImportRow({
+      invoiceNo: p.invoice_no, orderId: p.order_id, txType: p.tx_type, ticker: p.ticker,
+      shares: parseFloat(p.shares), unitPrice: parseFloat(p.unit_price),
+      grossUSD: parseFloat(p.gross_usd), fxRate: parseFloat(p.fx_rate),
+      grossTHB: parseFloat(p.gross_thb), effectiveDate: p.effective_date
+    });
+    await sb.from('pending_imports').update({ status: 'confirmed' }).eq('id', p.id);
+    _pendingImportsFromEmail.splice(idx, 1);
+    renderPendingImports();
+    renderAll();
+    renderImportHistory();
+    showToast(`✅ นำเข้า ${p.ticker} สำเร็จ`);
+  } catch (err) {
+    showToast('❌ นำเข้าไม่สำเร็จ: ' + err.message, 'var(--red)');
+  }
+}
+
+async function rejectPendingImport(idx) {
+  const p = _pendingImportsFromEmail[idx];
+  if (!p) return;
+  try {
+    await sb.from('pending_imports').update({ status: 'rejected' }).eq('id', p.id);
+  } catch (e) { }
+  _pendingImportsFromEmail.splice(idx, 1);
+  renderPendingImports();
+}
+
 async function bootApp() {
   await loadFromSupabase();
   await loadWalletFromSB();
   await loadAssetsFromSB();
   await loadImportHistoryFromSB();
   await loadGoldFromSB();
+  await loadPendingImportsFromSB();
 }
 
 // Keyboard support
