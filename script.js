@@ -1360,11 +1360,9 @@ function renderWatchlistSide() {
     const chgColor = pct >= 0 ? 'var(--green, #2ecc71)' : 'var(--red)';
     return `
       <div onclick="openDetail(${i})" class="watchlist-row${isActive ? ' active' : ''}">
-        <span class="mono" style="font-weight:700;font-size:0.82rem">${s.ticker}</span>
-        <span style="text-align:right">
-          <div class="mono" style="font-size:0.8rem">$${fmt(price)}</div>
-          <div class="mono" style="font-size:0.7rem;color:${chgColor}">${pct >= 0 ? '+' : ''}${fmt(pct,2)}%</div>
-        </span>
+        <span class="mono" style="font-weight:700;font-size:0.78rem">${s.ticker}</span>
+        <span class="mono" style="font-size:0.72rem">$${fmt(price)}</span>
+        <span class="mono" style="font-size:0.68rem;color:${chgColor}">${pct >= 0 ? '+' : ''}${fmt(pct,2)}%</span>
       </div>`;
   }).join('');
 }
