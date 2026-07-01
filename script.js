@@ -1340,14 +1340,26 @@ function renderWatchlistSide() {
   const el = document.getElementById('watchlistSide');
   if (!el) return;
   const stocks = getStocks();
-  el.innerHTML = stocks.map((s, i) => {
+  const searchEl = document.getElementById('watchlistSearch');
+  const q = (searchEl ? searchEl.value : '').trim().toUpperCase();
+
+  const rows = stocks
+    .map((s, i) => ({ s, i })) // keep original index for openDetail()
+    .filter(({ s }) => !q || s.ticker.toUpperCase().includes(q));
+
+  if (!rows.length) {
+    el.innerHTML = `<div style="padding:16px 6px;color:var(--muted);font-size:0.78rem;text-align:center">ไม่พบหุ้นที่ค้นหา</div>`;
+    return;
+  }
+
+  el.innerHTML = rows.map(({ s, i }) => {
     const lp = livePrices[s.ticker];
     const price = lp ? lp.price : parseFloat(s.price);
     const pct = lp ? lp.pct : 0;
     const isActive = i === detailState.idx;
     const chgColor = pct >= 0 ? 'var(--green, #2ecc71)' : 'var(--red)';
     return `
-      <div onclick="openDetail(${i})" style="display:flex;justify-content:space-between;align-items:center;padding:8px 6px;cursor:pointer;border-radius:6px;${isActive ? 'background:rgba(127,127,127,0.18);' : ''}" onmouseover="this.style.background='rgba(127,127,127,0.12)'" onmouseout="this.style.background='${isActive ? 'rgba(127,127,127,0.18)' : 'transparent'}'">
+      <div onclick="openDetail(${i})" class="watchlist-row${isActive ? ' active' : ''}">
         <span class="mono" style="font-weight:700;font-size:0.82rem">${s.ticker}</span>
         <span style="text-align:right">
           <div class="mono" style="font-size:0.8rem">$${fmt(price)}</div>

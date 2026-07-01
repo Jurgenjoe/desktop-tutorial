@@ -586,12 +586,12 @@
       <div class="form-row" style="margin:0">
         <label class="form-label">กลุ่มอุตสาหกรรม</label>
         <select class="form-input dropdown" id="f_sector" style="padding:10px 14px">
-            <option value="Tech">Technology</option>
-            <option value="Health">Healthcare</option>
-            <option value="Industrials">Industrials</option>
-            <option value="Utilities">Utilities</option>
-            <option value="Communication">Communication Services</option>
-            <option value="ETF">ETF</option>
+          <option value="Tech">Technology</option>
+          <option value="Health">Healthcare</option>
+          <option value="Energy">Energy</option>
+          <option value="Finance">Finance</option>
+          <option value="ETF">ETF</option>
+          <option value="Other">Other</option>
         </select>
       </div>
       <div class="form-row" style="margin:0">
@@ -644,6 +644,14 @@
   </div>
 
   <div class="detail-body">
+    <div class="detail-watchlist">
+      <div class="watchlist-search">
+        <input type="text" id="watchlistSearch" placeholder="🔍 ค้นหาหุ้น..." oninput="renderWatchlistSide()">
+      </div>
+      <div class="watchlist-header">รายการหุ้น (คลิกเพื่อสลับ)</div>
+      <div id="watchlistSide" class="watchlist-list"></div>
+    </div>
+
     <div class="detail-main">
       <div class="chart-toolbar">
         <div class="tf-group" id="tfGroup">
@@ -708,11 +716,6 @@
     </div>
 
     <div class="detail-side">
-      <div class="side-card">
-        <div class="side-title">📋 รายการหุ้น (คลิกเพื่อสลับ)</div>
-        <div id="watchlistSide" style="max-height:220px;overflow-y:auto"></div>
-      </div>
-
       <div class="side-card">
         <div class="side-title">สถานะการถือครอง</div>
         <div id="positionBlock"></div>
