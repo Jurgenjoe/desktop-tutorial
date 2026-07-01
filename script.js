@@ -107,24 +107,11 @@ async function seedDefaultData() {
 }
 
 async function ensureHistory() {
-  const today = new Date();
-  const toInsert = [];
+  // ไม่สุ่มสร้างข้อมูลราคาย้อนหลังปลอมอีกต่อไป (เดิมใช้ Math.random ใส่ jitter)
+  // ประวัติราคาจะมีเฉพาะรายการที่บันทึกจริงใน Supabase (ผ่าน "ประวัติราคา" ของแต่ละหุ้น) เท่านั้น
   _stocks.forEach(s => {
-    if (!_history[s.ticker] || _history[s.ticker].length === 0) {
-      _history[s.ticker] = [];
-      for (let i = 29; i >= 0; i--) {
-        const d = new Date(today); d.setDate(d.getDate()-i);
-        const key = d.toISOString().slice(0,10);
-        const jitter = (Math.random()-0.5)*0.06;
-        const p = parseFloat((s.price*(1 + jitter - (i*0.002))).toFixed(2));
-        _history[s.ticker].push({ date: key, price: p });
-        toInsert.push({ ticker: s.ticker, date: key, price: p });
-      }
-    }
+    if (!_history[s.ticker]) _history[s.ticker] = [];
   });
-  if (toInsert.length > 0) {
-    await sb.from('price_history').upsert(toInsert, { onConflict: 'ticker,date' });
-  }
 }
 
 // ---- SYNC FUNCTIONS ----
@@ -217,41 +204,27 @@ function renderSummary() {
   `;
 }
 
-// ---- LINE CHART with timeframe selector ----
+// ---- LINE CHART: MAX เท่านั้น (หน้าเดียว) ----
+// อิงจาก "จุดจริง" 2 จุด: (1) วันเริ่มลงทุนจริง 1 ก.พ. 67 ด้วยเงินต้นจริง $100
+// และ (2) มูลค่าพอร์ตจริงวันนี้ (คำนวณจากจำนวนหุ้น × ราคาปัจจุบันจริงของแต่ละตัว)
+// ถ้ามีการบันทึกราคาย้อนหลังจริงไว้ (ผ่านหน้า "ประวัติราคา" ของหุ้นแต่ละตัว) ครบทุกตัวที่ถือ ณ วันนั้น
+// จะใช้ค่าจริงวันนั้นแทนจุดประมาณการ ส่วนช่วงที่ไม่มีข้อมูลจริงจะ "ประมาณการเติบโต" แบบ compound
+// ระหว่าง 2 จุดจริงที่ใกล้ที่สุด (ไม่ใช่การสุ่ม/Math.random ใด ๆ ทั้งสิ้น)
 let lineChartInst = null;
-let currentLineChartTF = 'MAX';
-const PORTFOLIO_START = '2024-02-01'; // วันที่เริ่มออมจริง (1 ก.พ. 67)
+const PORTFOLIO_START = '2024-02-01'; // วันที่เริ่มลงทุนจริง (1 ก.พ. 67)
+const PORTFOLIO_START_VALUE_USD = 100; // เงินต้นจริงวันแรก ($100)
 
-function getLineChartRange(tf) {
-  const today = new Date();
-  let from;
-  switch (tf) {
-    case '1W': from = new Date(today); from.setDate(today.getDate() - 7); break;
-    case '1M': from = new Date(today); from.setMonth(today.getMonth() - 1); break;
-    case '3M': from = new Date(today); from.setMonth(today.getMonth() - 3); break;
-    case '6M': from = new Date(today); from.setMonth(today.getMonth() - 6); break;
-    case 'YTD': from = new Date(today.getFullYear(), 0, 1); break;
-    case '1Y': from = new Date(today); from.setFullYear(today.getFullYear() - 1); break;
-    case 'MAX': default: from = new Date(PORTFOLIO_START); break;
-  }
-  // ไม่ย้อนก่อนวันเริ่มต้น
-  if (from < new Date(PORTFOLIO_START)) from = new Date(PORTFOLIO_START);
-  return from;
-}
-
-function renderLineChart(tf) {
-  if (tf) currentLineChartTF = tf;
-  // อัปเดตปุ่ม
-  document.querySelectorAll('.tf-btn').forEach(b =>
-    b.classList.toggle('tf-btn-active', b.dataset.tf === currentLineChartTF));
+function renderLineChart() {
+  // อัปเดตปุ่ม (เหลือปุ่มเดียวคือ MAX)
+  document.querySelectorAll('.tf-btn').forEach(b => b.classList.add('tf-btn-active'));
 
   const stocks = getStocks();
   const h = getHistory();
   const today = new Date();
   const todayKey = today.toISOString().slice(0, 10);
-  const fromDate = getLineChartRange(currentLineChartTF);
+  const fromDate = new Date(PORTFOLIO_START);
 
-  // สร้างวันเทรดทุกวัน จ-ศ ในช่วงนั้น
+  // สร้างวันเทรดทุกวัน จ-ศ ตั้งแต่วันเริ่มลงทุนจริงถึงวันนี้
   const allDates = [];
   const cursor = new Date(fromDate);
   while (cursor <= today) {
@@ -259,60 +232,81 @@ function renderLineChart(tf) {
     if (dow >= 1 && dow <= 5) allDates.push(cursor.toISOString().slice(0, 10));
     cursor.setDate(cursor.getDate() + 1);
   }
+  if (allDates.length === 0 || allDates[allDates.length - 1] !== todayKey) allDates.push(todayKey);
 
-  // ลดจุดข้อมูลให้พอดีกราฟ (แสดงสูงสุดประมาณ 120 จุด)
+  // ลดจุดข้อมูลให้พอดีกราฟ (แสดงสูงสุดประมาณ 120 จุด) แต่ต้องเก็บวันแรกและวันนี้ไว้เสมอ
   let step = 1;
   if (allDates.length > 500) step = 5;
   else if (allDates.length > 250) step = 3;
   else if (allDates.length > 120) step = 2;
   const dates = allDates.filter((_, i) => i % step === 0 || i === allDates.length - 1);
+  if (dates[0] !== allDates[0]) dates.unshift(allDates[0]);
 
-  // หาวันที่เร็วที่สุดที่มีข้อมูลใน price_history จริง
-  const allHistDates = new Set();
-  stocks.forEach(s => (h[s.ticker] || []).forEach(x => allHistDates.add(x.date)));
-  const hasRealDataOn = (key) => allHistDates.has(key);
-  const firstRealDate = [...allHistDates].sort()[0] || todayKey;
+  // มูลค่าพอร์ตจริงวันนี้ (real): shares × ราคาปัจจุบันจริงของแต่ละหุ้น
+  const realTodayUSD = stocks.reduce((sum, s) => sum + parseFloat(s.price) * parseFloat(s.shares), 0);
 
-  // คำนวณมูลค่าพอร์ตแต่ละวัน
+  // หา "จุดจริง" ตรงกลาง: วันที่มีราคาย้อนหลังบันทึกจริงไว้ครบทุกหุ้นที่ถืออยู่ ณ ตอนนี้
+  function realTotalForDate(dateKey) {
+    let total = 0;
+    for (const s of stocks) {
+      const rec = (h[s.ticker] || []).find(x => x.date === dateKey);
+      if (!rec) return null; // ไม่มีข้อมูลจริงของหุ้นตัวนี้ในวันนี้ -> ไม่ถือว่าเป็นจุดจริง
+      total += rec.price * parseFloat(s.shares);
+    }
+    return total;
+  }
+
+  // รวบรวมจุดจริงทั้งหมด (รวมจุดเริ่มต้นและวันนี้) เรียงตามเวลา
+  const realPoints = [{ t: fromDate.getTime(), v: PORTFOLIO_START_VALUE_USD }];
+  dates.forEach(dk => {
+    if (dk === PORTFOLIO_START || dk === todayKey) return;
+    const rv = realTotalForDate(dk);
+    if (rv !== null) realPoints.push({ t: new Date(dk).getTime(), v: rv });
+  });
+  realPoints.push({ t: today.getTime(), v: realTodayUSD });
+  realPoints.sort((a, b) => a.t - b.t);
+
+  // ประมาณการเติบโตแบบ compound ระหว่างจุดจริง 2 จุดที่ใกล้ที่สุด (ไม่สุ่ม)
+  function estimateAt(ts) {
+    let lo = realPoints[0], hi = realPoints[realPoints.length - 1];
+    for (let i = 0; i < realPoints.length - 1; i++) {
+      if (ts >= realPoints[i].t && ts <= realPoints[i + 1].t) { lo = realPoints[i]; hi = realPoints[i + 1]; break; }
+    }
+    if (hi.t === lo.t) return lo.v;
+    const frac = (ts - lo.t) / (hi.t - lo.t);
+    if (lo.v > 0 && hi.v > 0) return lo.v * Math.pow(hi.v / lo.v, frac); // compound growth ระหว่าง 2 จุดจริง
+    return lo.v + (hi.v - lo.v) * frac; // เผื่อกรณีค่าติดลบ/ศูนย์
+  }
+
+  const realDateSet = new Set([PORTFOLIO_START, todayKey, ...realPoints.map(p => new Date(p.t).toISOString().slice(0,10))]);
+
   const labels = [], values = [], pointColors = [];
-  let prevVal = null;
-
   dates.forEach((dateKey) => {
-    let dayVal = 0;
-    stocks.forEach(s => {
-      const hist = (h[s.ticker] || []).find(x => x.date === dateKey);
-      dayVal += (hist ? hist.price : parseFloat(s.price)) * parseFloat(s.shares);
-    });
-    const displayVal = parseFloat((currency === 'THB' ? dayVal * THB_RATE : dayVal).toFixed(2));
+    const isRealPoint = dateKey === PORTFOLIO_START || dateKey === todayKey || realTotalForDate(dateKey) !== null;
+    const usdVal = isRealPoint
+      ? (dateKey === PORTFOLIO_START ? PORTFOLIO_START_VALUE_USD : (dateKey === todayKey ? realTodayUSD : realTotalForDate(dateKey)))
+      : estimateAt(new Date(dateKey).getTime());
+    const displayVal = parseFloat((currency === 'THB' ? usdVal * THB_RATE : usdVal).toFixed(2));
 
-    // Format label ตาม timeframe
     const d = new Date(dateKey);
-    let lbl;
-    if (currentLineChartTF === '1W') lbl = `${d.getDate()}/${d.getMonth() + 1}`;
-    else if (currentLineChartTF === '1M') lbl = `${d.getDate()}/${d.getMonth() + 1}`;
-    else if (currentLineChartTF === '3M') lbl = `${d.getDate()}/${d.getMonth() + 1}`;
-    else if (currentLineChartTF === '6M') lbl = `${d.getMonth() + 1}/${d.getDate()}`;
-    else lbl = `${d.getMonth() + 1}/${String(d.getFullYear()).slice(2)}`;
+    const lbl = `${d.getMonth() + 1}/${String(d.getFullYear()).slice(2)}`;
 
     labels.push(lbl);
     values.push(displayVal);
-    // สีจุด: เขียว = ขึ้น, แดง = ลง, เทา = ไม่มีข้อมูลจริง
-    const isReal = hasRealDataOn(dateKey) || dateKey === todayKey;
-    const isUp = prevVal === null || displayVal >= prevVal;
-    pointColors.push(isReal ? (isUp ? '#00e5a0' : '#ff4d6d') : 'rgba(90,100,120,0.4)');
-    prevVal = displayVal;
+    pointColors.push(isRealPoint ? '#00e5a0' : 'rgba(90,100,120,0.5)');
   });
 
-  // % เปลี่ยนแปลงตั้งแต่ต้นช่วง
-  const pctChange = values.length > 1 && values[0] > 0
-    ? ((values[values.length - 1] - values[0]) / values[0] * 100).toFixed(2) : null;
+  // % เปลี่ยนแปลงตั้งแต่ต้น (จุดจริง $100 -> มูลค่าจริงวันนี้)
+  const pctChange = ((realTodayUSD - PORTFOLIO_START_VALUE_USD) / PORTFOLIO_START_VALUE_USD * 100).toFixed(2);
   const infoEl = document.getElementById('lineChartInfo');
-  if (infoEl && pctChange !== null) {
+  if (infoEl) {
     const sign = pctChange >= 0 ? '+' : '';
     const col = pctChange >= 0 ? '#00e5a0' : '#ff4d6d';
-    infoEl.innerHTML = `ช่วงนี้: <span style="color:${col};font-weight:700;">${sign}${pctChange}%</span>
-      &nbsp;|&nbsp; เริ่มออม 1 ก.พ. 67 ด้วย $100
-      &nbsp;|&nbsp; ข้อมูลจริงตั้งแต่ ${firstRealDate}`;
+    const nRealPoints = realPoints.length;
+    infoEl.innerHTML = `MAX: <span style="color:${col};font-weight:700;">${sign}${pctChange}%</span>
+      &nbsp;|&nbsp; เริ่มลงทุนจริง 1 ก.พ. 67 ด้วย $100
+      &nbsp;|&nbsp; มูลค่าจริงวันนี้ ${fmtCur(realTodayUSD)}
+      &nbsp;|&nbsp; จุดข้อมูลจริง ${nRealPoints} จุด (จุดสีเทาบนกราฟคือค่าประมาณการระหว่างจุดจริง ไม่ใช่ราคาที่สุ่มขึ้น)`;
   }
 
   const ctx = document.getElementById('lineChart').getContext('2d');
