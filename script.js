@@ -490,23 +490,63 @@ function renderWeeklyChange() {
 let pieChartInst = null;
 function renderPieChart() {
   const stocks = getStocks();
-  const labels = stocks.map(s=>s.ticker);
-  const values = stocks.map(s=>parseFloat(s.price)*parseFloat(s.shares));
-  const colors = stocks.map(s=>s.color||'#888');
+  const labels = stocks.map(s => s.ticker);
+  const values = stocks.map(s => parseFloat(s.price) * parseFloat(s.shares));
+  const colors = stocks.map(s => s.color || '#888');
+  const total = values.reduce((a, b) => a + b, 0);
   const ctx = document.getElementById('pieChart').getContext('2d');
   if (pieChartInst) pieChartInst.destroy();
-  pieChartInst = new Chart(ctx,{
-    type:'doughnut',
-    data:{ labels, datasets:[{ data:values, backgroundColor:colors, borderColor:'#111419', borderWidth:2 }] },
-    options:{
-      responsive:true,
-      plugins:{
-        legend:{ position:'right', labels:{color:'#e8edf5',font:{size:10},boxWidth:12,padding:8}},
-        tooltip:{ callbacks:{ label: ctx => {
-          const total = ctx.dataset.data.reduce((a,b)=>a+b,0);
-          const pct = ((ctx.parsed/total)*100).toFixed(1);
-          return ` ${ctx.label}: ${pct}%`;
-        }}}
+
+  // Plugin ที่วาด label ชื่อหุ้นซ้อนในวงตรงๆ (เฉพาะ slice ที่ใหญ่พอ)
+  const innerLabelPlugin = {
+    id: 'innerLabel',
+    afterDatasetsDraw(chart) {
+      const { ctx: c, data } = chart;
+      const ds = chart.getDatasetMeta(0);
+      const total = data.datasets[0].data.reduce((a, b) => a + b, 0);
+      ds.data.forEach((arc, i) => {
+        const pct = (data.datasets[0].data[i] / total) * 100;
+        if (pct < 4) return; // slice เล็กเกินไป ไม่ใส่ label (กันซ้อนทับ)
+        const angle = (arc.startAngle + arc.endAngle) / 2;
+        const r = (arc.innerRadius + arc.outerRadius) / 2;
+        const x = arc.x + Math.cos(angle) * r;
+        const y = arc.y + Math.sin(angle) * r;
+        const fontSize = pct > 8 ? 11 : 9;
+        c.save();
+        c.textAlign = 'center';
+        c.textBaseline = 'middle';
+        c.fillStyle = '#fff';
+        c.font = `bold ${fontSize}px Inter, sans-serif`;
+        c.shadowColor = 'rgba(0,0,0,0.7)';
+        c.shadowBlur = 3;
+        c.fillText(data.labels[i], x, y);
+        c.restore();
+      });
+    }
+  };
+
+  pieChartInst = new Chart(ctx, {
+    type: 'doughnut',
+    data: { labels, datasets: [{ data: values, backgroundColor: colors, borderColor: '#111419', borderWidth: 2 }] },
+    plugins: [innerLabelPlugin],
+    options: {
+      responsive: true,
+      plugins: {
+        legend: {
+          position: 'right',
+          labels: { color: '#e8edf5', font: { size: 10 }, boxWidth: 12, padding: 8 }
+        },
+        tooltip: {
+          callbacks: {
+            label: ctx => {
+              const pct = ((ctx.parsed / total) * 100).toFixed(1);
+              const amt = ctx.parsed.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+              return ` ${ctx.label}:  $${amt}  (${pct}%)`;
+            }
+          },
+          bodyFont: { size: 13 },
+          padding: 10,
+        }
       }
     }
   });
